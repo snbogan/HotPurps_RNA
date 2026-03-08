@@ -39,6 +39,7 @@ library(Matrix)
 ```
 
 # Combining featureCounts .txt files
+
 ```{r}
 # 
 myfiles=list.files(path = "featureCounts_gene_id_pairs/txt_files", pattern = "*.txt")  #read in list of featureCounts .txt files
@@ -71,6 +72,7 @@ ggplot(data = data.frame(rowMeans(counts)),
 ```
 
 #Tests of differential expression 
+
 ```{r}
 # Create maternal treatment variable - this basically "extracts" that the first letter of the treatment which is the maternal treatment
 Mat = as.vector(sapply(colnames(counts), 
@@ -102,6 +104,7 @@ data_input_gc <- as.data.frame(round(data_input_gc))
 ```
 
 # Making DGEList and MDS plot
+
 ```{r}
 # Make DGElist
 
@@ -206,6 +209,7 @@ ordilabel(scores, cex = 0.5) # Label sample IDs
 ```
 
 #Outlier detection
+
 ```{r}
 
 # Create DESeq2 object required for arrayqualitymetrics
@@ -238,6 +242,8 @@ save(DGEList_keep,
      file = "DGEList_keep.Rdata")
 
 ```
+
+# Fit edgeR models w dispersion
 
 ```{r}
 # Create model design that includes maternal and developmental effects and set intercept to 0
@@ -279,6 +285,7 @@ fit_gc <- glmQLFit(DGEList,
 plotQLDisp(fit_gc) # High shrinkage / high statistical power across DE tests
 
 ```
+# Perform DE tests
 
 ```{r}
 ## Pairwise comparison of parental differential expression
@@ -440,12 +447,20 @@ GO Enrichment using Mann Whitney U Test
 
 ```{r}
 
-# Output maternal DEG data set
+# Output maternal DEG data set for gomwu
 write.csv(
    data.frame(
-  geneid = row.names(maternal_QLFT$table),
-  logFC = maternal_QLFT$table$logFC),
+     geneid = row.names(maternal_QLFT$table),
+     logFC = maternal_QLFT$table$logFC),
   row.names = FALSE, file = "~/Documents/GitHub/HotPurps_RNA/GO_MWU/mat_gomwu_input.csv"
+)
+
+# Output dev DEG data set for gomwu
+write.csv(
+   data.frame(
+     geneid = row.names(dev_QLFT$table),
+     logFC = dev_QLFT$table$logFC),
+   row.names = FALSE, file = "~/Documents/GitHub/HotPurps_RNA/GO_MWU/dev_gomwu_input.csv"
 )
 
 ```
@@ -474,10 +489,10 @@ setwd("~/Documents/GitHub/HotPurps_RNA/GO_MWU/")
 # First, press command-D on mac or ctrl-shift-H in Rstudio and navigate to the directory containing scripts and input files. Then edit, mark and execute the following bits of code, one after another.
 
 # Edit these to match your data file names: 
-input="mat_gomwu_input.csv" # two columns of comma-separated values: gene id, continuous measure of significance. To perform standard GO enrichment analysis based on Fisher's exact test, use binary measure (0 or 1, i.e., either sgnificant or not).
+input="dev_gomwu_input.csv" # two columns of comma-separated values: gene id, continuous measure of significance. To perform standard GO enrichment analysis based on Fisher's exact test, use binary measure (0 or 1, i.e., either sgnificant or not).
 goAnnotations="GCF_000002235.5_Spur_5.0_gene_ontology.tab" # two-column, tab-delimited, one line per gene, multiple GO terms separated by semicolon. If you have multiple lines per gene, use nrify_GOtable.pl prior to running this script.
 goDatabase="go.obo" # download from http://www.geneontology.org/GO.downloads.ontology.shtml
-goDivision="MF" # either MF, or BP, or CC
+goDivision="CC" # either MF, or BP, or CC
 source("gomwu.functions.R")
 
 # Calculating stats. It might take ~3 min for MF and BP. Do not rerun it if you just want to replot the data with different cutoffs, go straight to gomwuPlot. If you change any of the numeric values below, delete the files that were generated in previos runs first.
@@ -502,7 +517,7 @@ results=gomwuPlot(input, goAnnotations, goDivision,
 	level3=0.001, # FDR cutoff to print in large bold font.
 	txtsize=1,    # decrease to fit more on one page, or increase (after rescaling the plot so the tree fits the text) for better "word cloud" effect
 	treeHeight=1,# height of the hierarchical clustering tree
-  colors=c("salmon1","royalblue","lightcoral","skyblue") # these are default colors, un-remar and change if needed
+  colors=c("royalblue","salmon","skyblue","lightsalmon") # these are default colors, un-remar and change if needed
 )
 
 results
@@ -560,6 +575,21 @@ lipid_df <- read.csv("hotpurps_egg_lipid.csv")
 protein_df <- read.csv("hotpurps_egg_protein.csv")
 larv_morph_df <- read.csv("embryo_morphometrics.csv")
 
+# Quick plot of larval morphometric data
+ggplot(data = larv_morph_df,
+       aes(x = Mat, y = area_mm2, group = bucket)) +
+  facet_grid(~stage) +
+  geom_boxplot() +
+  geom_point() +
+  geom_path( stat = "identity") +
+  theme_classic()
+
+
+```
+
+
+```{r}
+
 # Calc mean lipid and protein by maternal treatment
 egg_df <- data.frame(
   Mat = c("C", "W"),
@@ -604,58 +634,80 @@ tab_hb_df <- merge(tab_morph_df,
                       by.x = "variable", 
                       by.y = "bucket")
 
-# Fit structural equation model: 
+## Fit structural equation model: 
+# Scale variables
+tab_prism_df$sc_area_mm2 <- scale(tab_prism_df$area_mm2)
+
+tab_prism_df <- tab_prism_df %>%
+  group_by(geneid) %>%
+  mutate(sc_logCPM = as.numeric(scale(value))) %>%
+  ungroup()
+
+library(MASS)
 
 # Fit prism SEM model A:
 lm1s <- dlply(tab_prism_df, c("geneid"), function(df) 
-lm(value ~ Mat + Dev, data = df))
+lm(sc_logCPM ~ Mat + Dev, data = df))
+
+tab_prism_df$CPM <- 2^tab_prism_df$value
+
+glm1s <- dlply(tab_prism_df, c("geneid"), function(df) 
+glm.nb(CPM ~ 1 + Mat + Dev, data = df))
 
 lm2s <- dlply(tab_prism_df, c("geneid"), function(df) 
-lm(area_mm2 ~ value + Mat, data = df))
+lm(sc_area_mm2 ~ sc_logCPM + Mat + Dev, data = df))
+
+lm3s <- dlply(tab_prism_df, c("geneid"), function(df) 
+lm(sc_area_mm2 ~ sc_logCPM + Dev, data = df))
+
+# Inspect models
+summary(lm1s$`4e-bp`)
+summary(lm2s$`4e-bp`)
+summary(lm3s$`4e-bp`)
 
 ```
 
-In 04/11/2024 meeting:
-
-- JC mentioned expectation that dev indirect effects be enriched by biomineralization-related GOs
-- SB mentioned expectation that mat indirect effects are more associated with adaptive phenotypic changes
-
-Plot ideas
-- Regraph of Jannine's prism data?
-- MD plots for DE (2 plots) and SEMs (4 plots: 2 treatments x 2 phenotypes)
-- Correlations between abs logFC and indirect, phenotypic effects
-- GO enrichment chart
-
-## HB SEMs
+# Mediation analyses: mat
 
 ```{r}
 
 library(parallel)
+library(mediation)
+library(pbapply)
 
 # Function to perform maternal mediation analysis
 run_mediation <- function(index) {
   tryCatch({
     summary(mediate(lm1s[[index]], lm2s[[index]], 
-                     boot = TRUE, sims = 10, 
-                     treat = "Mat", mediator = "value"))
-  }, error=function(e){paste("Error in index", index, ":", e$message)}) # Return the error message
+                    boot = TRUE, sims = 100, 
+                    treat = "Mat", mediator = "sc_logCPM"))
+  }, error = function(e) {
+    paste("Error in index", index, ":", e$message)
+  })
 }
 
-# Determine the number of cores
+# Determine number of cores
 no_cores <- detectCores() - 1
 
-# Create a cluster
+# Create cluster
 cl <- makeCluster(no_cores)
+
 clusterEvalQ(cl, library(mediation))
 clusterExport(cl, varlist = c("lm1s", "lm2s", "run_mediation"))
 
-# Run mediation in parallel
-mat_mediations <- parLapply(cl, 1:length(lm1s), run_mediation)
+# Enable progress bar
+pboptions(type = "timer")
 
-# Stop the cluster
+# Run mediation in parallel with progress bar
+mat_mediations <- pblapply(1:length(lm1s), run_mediation, cl = cl)
+
+# Stop cluster
 stopCluster(cl)
 
 names(mat_mediations) <- names(lm1s)
+
+# Inspect mediation analyses
+mat_mediations$`4e-bp`
 
 # Save and reload mediation
 save(mat_mediations, file = "11082024_mat_mediations.Rdata")
@@ -664,34 +716,46 @@ load("11082024_mat_mediations.Rdata")
 
 ```
 
-Developmental mediations
+## Dev mediations
 
 ```{r}
 
 # Function to perform maternal mediation analysis
-run_mediation_dev <- function(index) {
+run_mediation <- function(index) {
   tryCatch({
-    summary(mediate(lm1s[[index]], lm2s[[index]], 
-                     boot = TRUE, sims = 10, 
-                     treat = "Dev", mediator = "value"))
-  }, error=function(e){paste("Error in index", index, ":", e$message)}) # Return the error message
+    summary(mediate(lm1s[[index]], lm3s[[index]], 
+                    boot = TRUE, sims = 100, 
+                    treat = "Dev", mediator = "sc_logCPM"))
+  }, error = function(e) {
+    paste("Error in index", index, ":", e$message)
+  })
 }
 
-# Create a cluster
+# Determine number of cores
+no_cores <- detectCores() - 1
+
+# Create cluster
 cl <- makeCluster(no_cores)
+
 clusterEvalQ(cl, library(mediation))
-clusterExport(cl, varlist = c("lm1s", "lm2s", "run_mediation_dev"))
+clusterExport(cl, varlist = c("lm1s", "lm3s", "run_mediation"))
 
-# Run mediation in parallel
-mat_mediations_dev <- parLapply(cl, 1:length(lm1s), run_mediation_dev)
+# Enable progress bar
+pboptions(type = "timer")
 
-# Stop the cluster
+# Run mediation in parallel with progress bar
+dev_mediations <- pblapply(1:length(lm1s), run_mediation, cl = cl)
+
+# Stop cluster
 stopCluster(cl)
 
-names(mat_mediations_dev) <- names(lm1s)
+names(dev_mediations) <- names(lm1s)
+
+# Inspect mediation analyses
+dev_mediations$`4e-bp`
 
 # Save and reload mediation
-save(mat_mediations_dev, file = "04182024_dev_mediations.Rdata")
+save(dev_mediations, file = "11082024_dev_mediations.Rdata")
 
 load("04182024_dev_mediations.Rdata")
 
@@ -700,7 +764,7 @@ load("04182024_dev_mediations.Rdata")
 
 ```{r}
 
-# Extract indirect effect estimates
+# Extract indirect effect estimates:
 ind_est <- list() 
 
 for (i in 1:length(mat_mediations)) {
@@ -721,17 +785,9 @@ names(ind_est) <- names(mat_mediations)
 
 ind_est_df <- as.data.frame(t(bind_rows(ind_est, .id = "column_label")))
 
-# Change geneids to transcript id's for go annotation
-ind_est_df$column_label = rownames(ind_est_df)
-
-ind_est_df <- merge(ind_est_df,
-                      data.frame(column_label = unique$gene,
-                                 transcript = unique$Name),
-                      by = "column_label",
-                      all.x = TRUE)
 
 # Sign indirect effects by average direction of maternal DE
-ind_est_df$geneid <- ind_est_df$column_label
+ind_est_df$geneid <- row.names(ind_est_df)
 
 ind_est_df <- merge(ind_est_df,
                     data.frame(geneid = row.names(maternal_QLFT$table),
@@ -741,15 +797,15 @@ ind_est_df <- merge(ind_est_df,
 ind_est_df$ind_eff <- ind_est_df$V1 * ind_est_df$logFC
 
 # Export gomwu df of coefficients
-write.csv(na.omit(data.frame(geneid = paste("rna-", ind_est_df$transcript, sep = ""),
-                     coef = ind_est_df[,6])),
-          file = "~/Documents/GitHub/HotPurps_RNA_04032024_backup/GO_MWU-master/mat_ind_gomwu_new.csv",
+write.csv(na.omit(data.frame(geneid = ind_est_df$geneid,
+                     coef = ind_est_df$V1)),
+          file = "~/Documents/GitHub/HotPurps_RNA/GO_MWU/mat_ind_gomwu.csv",
           row.names = FALSE) # Resave the csv inexcel before GOMWU run
 
 # Export gomwu df of coefficients
-write.csv(na.omit(data.frame(geneid = paste("rna-", ind_est_df$transcript, sep = ""),
-                     coef = ind_est_df[,2])),
-          file = "~/Documents/GitHub/HotPurps_RNA_04032024_backup/GO_MWU-master/mat_ind_signed_p.csv",
+write.csv(na.omit(data.frame(geneid = ind_est_df$geneid,
+                     coef = ind_est_df$ind_eff)),
+          file = "~/Documents/GitHub/HotPurps_RNA/GO_MWU/mat_ind_gomwu_signed.csv",
           row.names = FALSE) # Resave the csv inexcel before GOMWU run
 
 ```
@@ -823,18 +879,20 @@ for (i in 1:length(ind_p)) {
 # Create df with geneid and indirect effect pvals
 ind_p$fdr <- p.adjust(ind_p$V1, method = "fdr")
 
-nrow(filter(ind_p, fdr < 0.05)) # 1147; 17% of all genes gave mediated fitness effect)
+nrow(filter(ind_p, fdr < 0.05)) # 349; 2% of all genes have mediated size effect)
 nrow(filter(ind_p, fdr < 0.05)) / nrow(ind_p)
 
 # Filter to include only transcripts with significant mediation parameter estimate
-sig_mat_meth_df <- filter(ind_ci, X2.5. > 0 & X97.5. > 0 | X2.5. < 0 & X97.5. < 0) # 1375 mat indirect genes
-nrow(sig_mat_meth_df) # 1375
+sig_mat_meth_df <- filter(ind_ci, X2.5. > 0 & X97.5. > 0 | X2.5. < 0 & X97.5. < 0) # 728 mat indirect genes
+nrow(sig_mat_meth_df) # 728
 
-# 7.98% of genes has mediated fitness effect
+# 4.22% of genes has mediated size effect
 nrow(sig_mat_meth_df) / nrow(ind_p)
 
 # How many mediation effects are positive vs. negative
-nrow(filter(sig_mat_meth_df, X2.5. > 0)) #483 are positive
+nrow(filter(sig_mat_meth_df, X2.5. > 0)) #206 are positive
+
+nrow(filter(sig_mat_meth_df, X2.5. < 0)) #522 are negative
 
 ```
 
@@ -843,10 +901,10 @@ nrow(filter(sig_mat_meth_df, X2.5. > 0)) #483 are positive
 # Extract p-values for indirect effects: E -> M -> GE
 ind_p_dev <- list()
 
-for (i in 1:length(mat_mediations_dev)) {
-  if (is.list(mat_mediations_dev[[i]]) || is.data.frame(mat_mediations_dev[[i]])) {
-    if (!is.null(mat_mediations_dev[[i]]$d0.p)) {
-      ind_p_dev[[i]] <- mat_mediations_dev[[i]]$d0.p
+for (i in 1:length(dev_mediations)) {
+  if (is.list(dev_mediations[[i]]) || is.data.frame(dev_mediations[[i]])) {
+    if (!is.null(dev_mediations[[i]]$d0.p)) {
+      ind_p_dev[[i]] <- dev_mediations[[i]]$d0.p
     } else {
       ind_p_dev[[i]] <- NA  # or some other placeholder to indicate missing data
     }
@@ -855,38 +913,38 @@ for (i in 1:length(mat_mediations_dev)) {
   }
 }
 
-names(ind_p_dev) <- names(mat_mediations_dev)
+names(ind_p_dev) <- names(dev_mediations)
 
 ind_p_dev <- as.data.frame(t(bind_rows(ind_p_dev, .id = "column_label")))
 
 # Extract indirect effect confidence intervals as data frames
 ind_ci_dev <- list()  
 
-for (i in 1:length(mat_mediations_dev)) {
-  if (is.list(mat_mediations_dev[[i]]) || is.data.frame(mat_mediations_dev[[i]])) {
+for (i in 1:length(dev_mediations)) {
+  if (is.list(dev_mediations[[i]]) || is.data.frame(dev_mediations[[i]])) {
     # Create a one-row data frame from the confidence intervals
-    ind_ci_dev[[i]] <- data.frame(t(as.data.frame(mat_mediations_dev[[i]]$d0.ci)))
+    ind_ci_dev[[i]] <- data.frame(t(as.data.frame(dev_mediations[[i]]$d0.ci)))
   } else {
     # Create an empty one-row data frame with NA if the element is not a list/data frame
     ind_ci_dev[[i]] <- data.frame(matrix(NA, nrow = 1, ncol = 1))
   }
   # Assign row name based on `mat_mediations` names
-  rownames(ind_ci_dev[[i]]) <- names(mat_mediations_dev)[i]
+  rownames(ind_ci_dev[[i]]) <- names(dev_mediations)[i]
 }
 
 # Assign names to the list
-names(ind_ci_dev) <- names(mat_mediations_dev)
+names(ind_ci_dev) <- names(dev_mediations)
 
 ind_ci_dev <- as.data.frame(bind_rows(ind_ci_dev, .id = "column_label"))
 
 # Extract indirect effect estimates
 ind_est_dev <- list() 
 
-for (i in 1:length(mat_mediations_dev)) {
+for (i in 1:length(dev_mediations)) {
   # Check if it's a list/data.frame and contains 'd0'
-  if ((is.list(mat_mediations_dev[[i]]) || is.data.frame(mat_mediations_dev[[i]])) && !is.null(mat_mediations_dev[[i]]$d0)) {
+  if ((is.list(dev_mediations[[i]]) || is.data.frame(dev_mediations[[i]])) && !is.null(dev_mediations[[i]]$d0)) {
     # Assuming 'd0' can be converted directly to a data.frame
-    temp_df <- mat_mediations_dev[[i]]$d0
+    temp_df <- dev_mediations[[i]]$d0
     
     # Transpose and then store in 'ind_est_d'
     ind_est_dev[[i]] <- temp_df
@@ -896,7 +954,7 @@ for (i in 1:length(mat_mediations_dev)) {
   }
 }
 
-names(ind_est_dev) <- names(mat_mediations_dev)
+names(ind_est_dev) <- names(dev_mediations)
 
 ind_est_dev <- as.data.frame(t(bind_rows(ind_est_dev, .id = "column_label")))
 
@@ -924,9 +982,6 @@ nrow(filter(sig_dev_meth_df, X2.5. > 0)) #1435 are positive
 ind_ci$geneid <- row.names(ind_ci)
 ind_p_est <- merge(ind_ci, ind_est_df, by = "geneid")
 
-nrow(filter(ind_p_est, fdr < 0.05, ind_eff > 0))
-nrow(filter(ind_p_est, fdr < 0.05, ind_eff < 0))
-
 # Create data for Erin
 write.csv(
   data.frame(
@@ -942,40 +997,12 @@ write.csv(
 
 ```
 
-
-```{r}
-## Export results for functional enrichment analysis
-
-library(rtracklayer)
-library(data.table)
-
-spour5.0_gff <- as.data.frame(import("~/Documents/GitHub/HotPurps_RNA_04032024_backup/genome_resources/sp5_0_GCF.gff3"))
-
-spour5.0_RNAs <- filter(spour5.0_gff, type == "mRNA")
-unique <- spour5.0_RNAs[!duplicated(spour5.0_RNAs$gene), ]
-
-ind_est_d_df$column_label = rownames(ind_est_d_df)
-
-ind_est_d_df <- merge(ind_est_d_df,
-                      data.frame(column_label = unique$gene,
-                                 transcript = unique$Name),
-                      by = "column_label",
-                      all.x = TRUE)
-
-# Export gomwu df of coefficients
-write.csv(data.frame(geneid = paste("rna-", ind_est_d_df$transcript, sep = ""),
-                     coef = ind_est_d_df[,2]),
-          file = "GO_MWU-master/mat_lipid_ind_gomwu.csv",
-          row.names = FALSE)
-
-```
-
 # Functional enrichment analyses
 
 ```{r}
 
 # GO enrichments using Mann Whitney U tests
-setwd("~/Documents/GitHub/HotPurps_RNA_04032024_backup/GO_MWU-master/")
+setwd("~/Documents/GitHub/HotPurps_RNA/GO_MWU/")
 
 #Now we multiply them together into a new column
 
@@ -996,8 +1023,8 @@ setwd("~/Documents/GitHub/HotPurps_RNA_04032024_backup/GO_MWU-master/")
 # First, press command-D on mac or ctrl-shift-H in Rstudio and navigate to the directory containing scripts and input files. Then edit, mark and execute the following bits of code, one after another.
 
 # Edit these to match your data file names: 
-input = "mat_ind_gomwu_new.csv" # two columns of comma-separated values: gene id, continuous measure of significance. To perform standard GO enrichment analysis based on Fisher's exact test, use binary measure (0 or 1, i.e., either sgnificant or not).
-goAnnotations="goAnnot_spur5.0.tab" # two-column, tab-delimited, one line per gene, multiple GO terms separated by semicolon. If you have multiple lines per gene, use nrify_GOtable.pl prior to running this script.
+input = "mat_ind_gomwu_signed.csv" # two columns of comma-separated values: gene id, continuous measure of significance. To perform standard GO enrichment analysis based on Fisher's exact test, use binary measure (0 or 1, i.e., either sgnificant or not).
+goAnnotations="GCF_000002235.5_Spur_5.0_gene_ontology.tab" # two-column, tab-delimited, one line per gene, multiple GO terms separated by semicolon. If you have multiple lines per gene, use nrify_GOtable.pl prior to running this script.
 goDatabase="go.obo" # download from http://www.geneontology.org/GO.downloads.ontology.shtml
 goDivision="CC" # either MF, or BP, or CC
 source("gomwu.functions.R")
@@ -1033,21 +1060,3 @@ results=gomwuPlot(input, goAnnotations, goDivision,
 results
   
 ```
-
-```
-
-### 03/082024 Results summary from SB
-
-Results:
-* ~2600 genes show a mediating effect of maternal treatment on prism body size, such that DE of the gene induced by maternal heat stress may drive increases in prism size. Of these,  ~800 were upregulated and ~1800 were downregulated.
-
-* A gene ontology mann whitney U test shows that there are GO terms enriched for downregulated genes that mediated a positive effect of maternal heat stress on prism body size. There was no functional enrichment among upregulated genes.
-
-* GO terms localized to the following cellular components: golgi apparatus, cytoskeleton, microtubule cytoskeleton, supramolecular complex, and supramolecular polymer.
-
-* Enriched molecular functions include: structural constituent of cytoskeleton, FMB binding, and oxidoreductase activity.
-
-* No biological process GO terms were enriched. Together, this suggests that the positive effect of maternal conditioning on prism size is related to downregulation of pathways responsible for antioxidation and building cytoskeletal macromolecules. Both reactive oxygen stress and cytoskeletal macromolecule synthesis are important components of golgi body function.
-
-* Interestingly, none of these pathways relate to protein or lipid metabolism, which was my a priori expectation. We can repeat the above analysis for hatched blastula and early gastrula areas and report those results alongside the prism effects. One possibility may be that protein provisioning of eggs (and maybe lipid provisioning) affect protein/lipid metabolism in embryos but this effect is washed out by the time you get to prism.
-
